@@ -7,17 +7,17 @@ block content
       height: 500px;
     }
 
-  .page-header
+  .pb-2.mt-2.mb-4.border-bottom
     h2
-      i.fa.fa-google
+      i.fab.fa-google.fa-sm
       | Google Maps API
 
-  .btn-group.btn-group-justified
-    a.btn.btn-primary(href='https://developers.google.com/maps/documentation/javascript/tutorial', target='_blank')
-      i.fa.fa-check-square-o
+  .btn-group.d-flex(role='group')
+    a.btn.btn-primary(href='https://developers.google.com/maps/documentation/javascript/tutorial', target='_blank').w-100
+      i.far.fa-check-square.fa-sm
       | Getting Started
-    a.btn.btn-primary(href='https://console.developers.google.com/apis/dashboard', target='_blank')
-      i.fa.fa-laptop
+    a.btn.btn-primary(href='https://console.developers.google.com/apis/dashboard', target='_blank').w-100
+      i.fas.fa-laptop.fa-sm
       | API Console
 
   h3 Markers Example
@@ -155,5 +155,4 @@ block content
       });
     }
 
-  script(src='https://maps.googleapis.com/maps/api/js?key=AIzaSyCJUqqC9Lg3-ayYuWa1VgDk5hiHiHIe30A&callback=initMap')
-
+  script(async defer src=`https://maps.googleapis.com/maps/api/js?key=${google_map_api_key}&callback=initMap`)

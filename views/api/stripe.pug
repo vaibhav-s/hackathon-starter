@@ -1,18 +1,20 @@
 extends ../layout
 
 block content
-  .page-header
-    h2 Stripe API
+  .pb-2.mt-2.mb-4.border-bottom
+    h2
+      i.fab.fa-cc-stripe.fa-sm
+      | Stripe API
 
-  .btn-group.btn-group-justified
+  .btn-group.d-flex(role='group')
     a.btn.btn-primary(href='https://stripe.com/docs/tutorials/checkout')
-      i.fa.fa-home
+      i.fas.fa-home.fa-sm
       | Stripe Checkout
-    a.btn.btn-primary(href='https://stripe.com/docs/api', target='_blank')
-      i.fa.fa-code
+    a.btn.btn-primary(href='https://stripe.com/docs/api', target='_blank').w-100
+      i.fas.fa-code.fa-sm
       | API Reference
-    a.btn.btn-primary(href='https://manage.stripe.com/account/apikeys', target='_blank')
-      i.fa.fa-gear
+    a.btn.btn-primary(href='https://manage.stripe.com/account/apikeys', target='_blank').w-100
+      i.fas.fa-cog.fa-sm
       | Get API Keys
 
   br
@@ -23,17 +25,17 @@ block content
     src='https://checkout.stripe.com/checkout.js',
     class='stripe-button',
     data-key=publishableKey,
-    data-image='http://static.tumblr.com/nljhkjv/z0Jlpk23i/logo',
+    data-image='https://static.tumblr.com/nljhkjv/z0Jlpk23i/logo',
     data-name='Hackathon Starter',
     data-description='Caramel Macchiato ($3.95)',
     data-amount='395')
 
   h3
-    i.fa.fa-credit-card
+    i.far.fa-credit-card.fa-sm
     | Test Cards
   p In test mode, you can use these test cards to simulate a successful transaction:
 
-  table.table.table-striped.table-bordered.table-condensed
+  table.table.table-striped.table-bordered.table-sm
     thead
       tr
         th Number
@@ -76,12 +78,12 @@ block content
           td 3566 0020 2036 0505
           td JCB
 
-  .panel.panel-primary
-    .panel-heading Stripe Successful Charge Example
-    .panel-body
+  .card.text-white.bg-primary
+    .card-header Stripe Successful Charge Example
+    .card-body.text-dark.bg-white
       p This is the response you will get when customer's card has been charged successfully.
         | You could use some of the data below for logging purposes.
-      pre.
+      pre.card.bg-light.
         { id: 'ch_103qzW2eZvKYlo2CiYcKs6Sw',
           object: 'charge',
           created: 1397510564,

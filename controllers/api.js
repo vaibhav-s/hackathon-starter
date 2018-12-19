@@ -1,10 +1,10 @@
-const bluebird = require('bluebird');
-const request = bluebird.promisifyAll(require('request'), { multiArgs: true });
+const { promisify } = require('util');
+const request = require('request');
 const cheerio = require('cheerio');
 const graph = require('fbgraph');
-const LastFmNode = require('lastfm').LastFmNode;
+const { LastFmNode } = require('lastfm');
 const tumblr = require('tumblr.js');
-const GitHub = require('github');
+const GitHub = require('@octokit/rest');
 const Twit = require('twit');
 const stripe = require('stripe')(process.env.STRIPE_SKEY);
 const twilio = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
@@ -12,17 +12,18 @@ const Linkedin = require('node-linkedin')(process.env.LINKEDIN_ID, process.env.L
 const clockwork = require('clockwork')({ key: process.env.CLOCKWORK_KEY });
 const paypal = require('paypal-rest-sdk');
 const lob = require('lob')(process.env.LOB_KEY);
-const ig = bluebird.promisifyAll(require('instagram-node').instagram());
-const foursquare = require('node-foursquare')({
+const ig = require('instagram-node').instagram();
+const { Venues, Users } = require('node-foursquare')({
   secrets: {
     clientId: process.env.FOURSQUARE_ID,
     clientSecret: process.env.FOURSQUARE_SECRET,
     redirectUrl: process.env.FOURSQUARE_REDIRECT_URL
+  },
+  foursquare: {
+    mode: 'foursquare',
+    version: 20140806,
   }
 });
-
-foursquare.Venues = bluebird.promisifyAll(foursquare.Venues);
-foursquare.Users = bluebird.promisifyAll(foursquare.Users);
 
 /**
  * GET /api
@@ -38,22 +39,24 @@ exports.getApi = (req, res) => {
  * GET /api/foursquare
  * Foursquare API example.
  */
-exports.getFoursquare = (req, res, next) => {
+exports.getFoursquare = async (req, res, next) => {
   const token = req.user.tokens.find(token => token.kind === 'foursquare');
-  Promise.all([
-    foursquare.Venues.getTrendingAsync('40.7222756', '-74.0022724', { limit: 50 }, token.accessToken),
-    foursquare.Venues.getVenueAsync('49da74aef964a5208b5e1fe3', token.accessToken),
-    foursquare.Users.getCheckinsAsync('self', null, token.accessToken)
-  ])
-  .then(([trendingVenues, venueDetail, userCheckins]) => {
-    res.render('api/foursquare', {
+  try {
+    const getTrendingAsync = promisify(Venues.getTrending);
+    const getVenueAsync = promisify(Venues.getVenue);
+    const getCheckinsAsync = promisify(Users.getCheckins);
+    const trendingVenues = await getTrendingAsync('40.7222756', '-74.0022724', { limit: 50 }, token.accessToken);
+    const venueDetail = await getVenueAsync('49da74aef964a5208b5e1fe3', token.accessToken);
+    const userCheckins = await getCheckinsAsync('self', null, token.accessToken);
+    return res.render('api/foursquare', {
       title: 'Foursquare API',
       trendingVenues,
       venueDetail,
       userCheckins
     });
-  })
-  .catch(next);
+  } catch (err) {
+    return next(err);
+  }
 };
 
 /**
@@ -68,7 +71,7 @@ exports.getTumblr = (req, res, next) => {
     token: token.accessToken,
     token_secret: token.tokenSecret
   });
-  client.posts('mmosdotcom.tumblr.com', { type: 'photo' }, (err, data) => {
+  client.blogPosts('mmosdotcom.tumblr.com', { type: 'photo' }, (err, data) => {
     if (err) { return next(err); }
     res.render('api/tumblr', {
       title: 'Tumblr API',
@@ -85,11 +88,11 @@ exports.getTumblr = (req, res, next) => {
 exports.getFacebook = (req, res, next) => {
   const token = req.user.tokens.find(token => token.kind === 'facebook');
   graph.setAccessToken(token.accessToken);
-  graph.get(`${req.user.facebook}?fields=id,name,email,first_name,last_name,gender,link,locale,timezone`, (err, results) => {
+  graph.get(`${req.user.facebook}?fields=id,name,email,first_name,last_name,gender,link,locale,timezone`, (err, profile) => {
     if (err) { return next(err); }
     res.render('api/facebook', {
       title: 'Facebook API',
-      profile: results
+      profile
     });
   });
 };
@@ -117,15 +120,17 @@ exports.getScraping = (req, res, next) => {
  * GET /api/github
  * GitHub API Example.
  */
-exports.getGithub = (req, res, next) => {
+exports.getGithub = async (req, res, next) => {
   const github = new GitHub();
-  github.repos.get({ owner: 'sahat', repo: 'hackathon-starter' }, (err, repo) => {
-    if (err) { return next(err); }
+  try {
+    const { data: repo } = await github.repos.get({ owner: 'sahat', repo: 'hackathon-starter' });
     res.render('api/github', {
       title: 'GitHub API',
       repo
     });
-  });
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**
@@ -164,12 +169,12 @@ exports.getNewYorkTimes = (req, res, next) => {
  * GET /api/lastfm
  * Last.fm API example.
  */
-exports.getLastfm = (req, res, next) => {
+exports.getLastfm = async (req, res, next) => {
   const lastfm = new LastFmNode({
     api_key: process.env.LASTFM_KEY,
     secret: process.env.LASTFM_SECRET
   });
-  const artistInfo = () =>
+  const getArtistInfo = () =>
     new Promise((resolve, reject) => {
       lastfm.request('artist.getInfo', {
         artist: 'Roniit',
@@ -179,59 +184,75 @@ exports.getLastfm = (req, res, next) => {
         }
       });
     });
-  const artistTopTracks = () =>
+  const getArtistTopTracks = () =>
     new Promise((resolve, reject) => {
       lastfm.request('artist.getTopTracks', {
         artist: 'Roniit',
         handlers: {
-          success: (data) => {
-            resolve(data.toptracks.track.slice(0, 10));
+          success: ({ toptracks }) => {
+            resolve(toptracks.track.slice(0, 10));
           },
           error: reject
         }
       });
     });
-  const artistTopAlbums = () =>
-      new Promise((resolve, reject) => {
-        lastfm.request('artist.getTopAlbums', {
-          artist: 'Roniit',
-          handlers: {
-            success: (data) => {
-              resolve(data.topalbums.album.slice(0, 3));
-            },
-            error: reject
-          }
-        });
+  const getArtistTopAlbums = () =>
+    new Promise((resolve, reject) => {
+      lastfm.request('artist.getTopAlbums', {
+        artist: 'Roniit',
+        handlers: {
+          success: ({ topalbums }) => {
+            resolve(topalbums.album.slice(0, 3));
+          },
+          error: reject
+        }
       });
-  Promise.all([
-    artistInfo(),
-    artistTopTracks(),
-    artistTopAlbums()
-  ])
-  .then(([artistInfo, artistTopAlbums, artistTopTracks]) => {
+    });
+  try {
+    const { artist: artistInfo } = await getArtistInfo();
+    const topTracks = await getArtistTopTracks();
+    const topAlbums = await getArtistTopAlbums();
     const artist = {
-      name: artistInfo.artist.name,
-      image: artistInfo.artist.image.slice(-1)[0]['#text'],
-      tags: artistInfo.artist.tags.tag,
-      bio: artistInfo.artist.bio.summary,
-      stats: artistInfo.artist.stats,
-      similar: artistInfo.artist.similar.artist,
-      topAlbums: artistTopAlbums,
-      topTracks: artistTopTracks
+      name: artistInfo.name,
+      image: artistInfo.image ? artistInfo.image.slice(-1)[0]['#text'] : null,
+      tags: artistInfo.tags ? artistInfo.tags.tag : [],
+      bio: artistInfo.bio ? artistInfo.bio.summary : '',
+      stats: artistInfo.stats,
+      similar: artistInfo.similar ? artistInfo.similar.artist : [],
+      topTracks,
+      topAlbums
     };
     res.render('api/lastfm', {
       title: 'Last.fm API',
       artist
     });
-  })
-  .catch(next);
+  } catch (err) {
+    if (err.error !== undefined) {
+      console.error(err);
+      // see error code list: https://www.last.fm/api/errorcodes
+      switch (err.error) {
+        // potentially handle each code uniquely
+        case 10: // Invalid API key
+          res.render('api/lastfm', {
+            error: err
+          });
+          break;
+        default:
+          res.render('api/lastfm', {
+            error: err
+          });
+      }
+    } else {
+      next(err);
+    }
+  }
 };
 
 /**
  * GET /api/twitter
  * Twitter API example.
  */
-exports.getTwitter = (req, res, next) => {
+exports.getTwitter = async (req, res, next) => {
   const token = req.user.tokens.find(token => token.kind === 'twitter');
   const T = new Twit({
     consumer_key: process.env.TWITTER_KEY,
@@ -239,13 +260,19 @@ exports.getTwitter = (req, res, next) => {
     access_token: token.accessToken,
     access_token_secret: token.tokenSecret
   });
-  T.get('search/tweets', { q: 'nodejs since:2013-01-01', geocode: '40.71448,-74.00598,5mi', count: 10 }, (err, reply) => {
-    if (err) { return next(err); }
+  try {
+    const { data: { statuses: tweets } } = await T.get('search/tweets', {
+      q: 'nodejs since:2013-01-01',
+      geocode: '40.71448,-74.00598,5mi',
+      count: 10
+    });
     res.render('api/twitter', {
       title: 'Twitter API',
-      tweets: reply.statuses
+      tweets
     });
-  });
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**
@@ -280,54 +307,63 @@ exports.postTwitter = (req, res, next) => {
  * GET /api/steam
  * Steam API example.
  */
-exports.getSteam = (req, res, next) => {
-  const steamId = '76561197982488301';
+exports.getSteam = async (req, res, next) => {
+  const steamId = req.user.steam;
   const params = { l: 'english', steamid: steamId, key: process.env.STEAM_KEY };
-  const playerAchievements = () => {
-    params.appid = '49520';
-    return request.getAsync({ url: 'http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/', qs: params, json: true })
-      .then(([request, body]) => {
+  const getAsync = promisify(request.get);
+
+  // get the list of the recently played games, pick the most recent one and get its achievements
+  const getPlayerAchievements = () =>
+    getAsync({ url: 'http://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/', qs: params, json: true })
+      .then(({ request, body }) => {
         if (request.statusCode === 401) {
           throw new Error('Invalid Steam API Key');
         }
-        return body;
+        if (body.response.total_count > 0) {
+          params.appid = body.response.games[0].appid;
+          return getAsync({ url: 'http://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/', qs: params, json: true })
+            .then(({ request, body }) => {
+              if (request.statusCode === 401) {
+                throw new Error('Invalid Steam API Key');
+              }
+              return body;
+            });
+        }
       });
-  };
-  const playerSummaries = () => {
+  const getPlayerSummaries = () => {
     params.steamids = steamId;
-    return request.getAsync({ url: 'http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/', qs: params, json: true })
-      .then(([request, body]) => {
+    return getAsync({ url: 'http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/', qs: params, json: true })
+      .then(({ request, body }) => {
         if (request.statusCode === 401) {
           throw Error('Missing or Invalid Steam API Key');
         }
         return body;
       });
   };
-  const ownedGames = () => {
+  const getOwnedGames = () => {
     params.include_appinfo = 1;
     params.include_played_free_games = 1;
-    return request.getAsync({ url: 'http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/', qs: params, json: true })
-      .then(([request, body]) => {
+    return getAsync({ url: 'http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/', qs: params, json: true })
+      .then(({ request, body }) => {
         if (request.statusCode === 401) {
           throw new Error('Missing or Invalid Steam API Key');
         }
         return body;
       });
   };
-  Promise.all([
-    playerAchievements(),
-    playerSummaries(),
-    ownedGames()
-  ])
-  .then(([playerAchievements, playerSummaries, ownedGames]) => {
+  try {
+    const playerAchievements = await getPlayerAchievements();
+    const playerSummaries = await getPlayerSummaries();
+    const ownedGames = await getOwnedGames();
     res.render('api/steam', {
       title: 'Steam Web API',
-      ownedGames: ownedGames.response.games,
-      playerAchievemments: playerAchievements.playerstats,
+      ownedGames: ownedGames.response,
+      playerAchievemments: playerAchievements ? playerAchievements.playerstats : null,
       playerSummary: playerSummaries.response.players[0]
     });
-  })
-  .catch(next);
+  } catch (err) {
+    next(err);
+  }
 };
 
 /**
@@ -346,8 +382,7 @@ exports.getStripe = (req, res) => {
  * Make a payment.
  */
 exports.postStripe = (req, res) => {
-  const stripeToken = req.body.stripeToken;
-  const stripeEmail = req.body.stripeEmail;
+  const { stripeToken, stripeEmail } = req.body;
   stripe.charges.create({
     amount: 395,
     currency: 'usd',
@@ -393,11 +428,10 @@ exports.postTwilio = (req, res, next) => {
     from: '+13472235148',
     body: req.body.message
   };
-  twilio.sendMessage(message, (err, responseData) => {
-    if (err) { return next(err.message); }
-    req.flash('success', { msg: `Text sent to ${responseData.to}.` });
+  twilio.messages.create(message).then((sentMessage) => {
+    req.flash('success', { msg: `Text send to ${sentMessage.to}` });
     res.redirect('/api/twilio');
-  });
+  }).catch(next);
 };
 
 /**
@@ -447,26 +481,26 @@ exports.getLinkedin = (req, res, next) => {
  * GET /api/instagram
  * Instagram API example.
  */
-exports.getInstagram = (req, res, next) => {
+exports.getInstagram = async (req, res, next) => {
   const token = req.user.tokens.find(token => token.kind === 'instagram');
   ig.use({ client_id: process.env.INSTAGRAM_ID, client_secret: process.env.INSTAGRAM_SECRET });
   ig.use({ access_token: token.accessToken });
-  Promise.all([
-    ig.user_searchAsync('richellemead'),
-    ig.userAsync('175948269'),
-    ig.media_popularAsync(),
-    ig.user_self_media_recentAsync()
-  ])
-  .then(([searchByUsername, searchByUserId, popularImages, myRecentMedia]) => {
+  try {
+    const userSearchAsync = promisify(ig.user_search);
+    const userAsync = promisify(ig.user);
+    const userSelfMediaRecentAsync = promisify(ig.user_self_media_recent);
+    const searchByUsername = await userSearchAsync('richellemead');
+    const searchByUserId = await userAsync('175948269');
+    const myRecentMedia = await userSelfMediaRecentAsync();
     res.render('api/instagram', {
       title: 'Instagram API',
       usernames: searchByUsername,
       userById: searchByUserId,
-      popularImages,
       myRecentMedia
     });
-  })
-  .catch(next);
+  } catch (error) {
+    next(error);
+  }
 };
 
 /**
@@ -500,8 +534,8 @@ exports.getPayPal = (req, res, next) => {
 
   paypal.payment.create(paymentDetails, (err, payment) => {
     if (err) { return next(err); }
-    req.session.paymentId = payment.id;
-    const links = payment.links;
+    const { links, id } = payment;
+    req.session.paymentId = id;
     for (let i = 0; i < links.length; i++) {
       if (links[i].rel === 'approval_url') {
         res.render('api/paypal', {
@@ -517,7 +551,7 @@ exports.getPayPal = (req, res, next) => {
  * PayPal SDK example.
  */
 exports.getPayPalSuccess = (req, res) => {
-  const paymentId = req.session.paymentId;
+  const { paymentId } = req.session;
   const paymentDetails = { payer_id: req.query.PayerID };
   paypal.payment.execute(paymentId, paymentDetails, (err) => {
     res.render('api/paypal', {
@@ -544,11 +578,11 @@ exports.getPayPalCancel = (req, res) => {
  * Lob API example.
  */
 exports.getLob = (req, res, next) => {
-  lob.routes.list({ zip_codes: ['10007'] }, (err, routes) => {
+  lob.usZipLookups.lookup({ zip_code: '94107' }, (err, zipdetails) => {
     if (err) { return next(err); }
     res.render('api/lob', {
       title: 'Lob API',
-      routes: routes.data[0].routes
+      zipdetails,
     });
   });
 };
@@ -621,6 +655,7 @@ exports.postPinterest = (req, res, next) => {
 
 exports.getGoogleMaps = (req, res) => {
   res.render('api/google-maps', {
-    title: 'Google Maps API'
+    title: 'Google Maps API',
+    google_map_api_key: process.env.GOOGLE_MAP_API_KEY
   });
 };
